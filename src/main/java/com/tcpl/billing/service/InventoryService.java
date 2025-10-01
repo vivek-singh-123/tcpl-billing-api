@@ -5,6 +5,7 @@ import com.tcpl.billing.model.Inventory;
 import com.tcpl.billing.repository.InventoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional; // Yeh import add karein
 
 import java.util.List;
 
@@ -15,6 +16,7 @@ public class InventoryService {
     private final InventoryRepository inventoryRepo;
 
     // --- GET inventory with optional filters ---
+    // Is method mein koi change nahi hai
     public List<Inventory> listInventory(Long projectId, Long materialId) {
         if (projectId != null && materialId != null) {
             return inventoryRepo.findByProjectIdAndMaterialId(projectId, materialId);
@@ -28,28 +30,31 @@ public class InventoryService {
     }
 
     // --- POST inventory move ---
+    // Yeh poora method update kiya gaya hai
+    @Transactional
     public Inventory moveInventory(InventoryMoveRequest req) {
-        // Reduce quantity from source location
-        Inventory fromInv = inventoryRepo.findByProjectIdAndMaterialId(null, req.getMaterialId())
-                .stream()
-                .filter(inv -> inv.getLocation().equals(req.getFrom()))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No inventory at source location"));
+        // --- SOURCE INVENTORY ---
+        // Puraane, buggy code ko is naye code se replace kiya gaya hai
+        Inventory fromInv = inventoryRepo.findByMaterialIdAndLocation(req.getMaterialId(), req.getFrom())
+                .orElseThrow(() -> new RuntimeException(
+                        "No inventory at source location for materialId: " + req.getMaterialId() + " and location: " + req.getFrom()
+                ));
 
         if (fromInv.getQuantity() < req.getQty()) {
-            throw new RuntimeException("Insufficient quantity at source location");
+            throw new RuntimeException("Insufficient quantity at source location: " + req.getFrom());
         }
         fromInv.setQuantity(fromInv.getQuantity() - req.getQty());
-        inventoryRepo.save(fromInv);
 
-        // Add quantity to destination location
-        Inventory toInv = inventoryRepo.findByProjectIdAndMaterialId(null, req.getMaterialId())
-                .stream()
-                .filter(inv -> inv.getLocation().equals(req.getTo()))
-                .findFirst()
-                .orElse(new Inventory(null, null, req.getMaterialId(), 0, req.getTo()));
+        // --- DESTINATION INVENTORY ---
+        // Puraane, buggy code ko is naye code se replace kiya gaya hai
+        // Agar destination par stock nahi hai, toh ek naya record banega
+        Inventory toInv = inventoryRepo.findByMaterialIdAndLocation(req.getMaterialId(), req.getTo())
+                .orElse(new Inventory(null, null, req.getMaterialId(), 0.0, req.getTo()));
 
         toInv.setQuantity(toInv.getQuantity() + req.getQty());
+
+        // Dono changes ko transaction mein save karein
+        inventoryRepo.save(fromInv);
         return inventoryRepo.save(toInv);
     }
 }
